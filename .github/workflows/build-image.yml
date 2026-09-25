@@ -1,0 +1,83 @@
+name: Build and publish ml_api
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: ml-api-image-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      - name: Check out obico-server
+        uses: actions/checkout@v4
+        with:
+          repository: TheSpaghettiDetective/obico-server
+          ref: release
+          path: obico-server
+
+      - name: Check upstream commit
+        id: upstream
+        shell: bash
+        run: |
+          source_sha="$(git -C obico-server rev-parse HEAD)"
+          recorded_sha="$(tr -d '\r\n' < .github/dependencies/.commit-id)"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+          if [[ "$source_sha" == "$recorded_sha" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream changes; skipping the image build."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream changed from '$recorded_sha' to '$source_sha'."
+          fi
+
+      - name: Log in to GitHub Container Registry
+        if: steps.upstream.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ml_api
+        if: steps.upstream.outputs.changed == 'true'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.upstream.outputs.source_sha }}
+        run: |
+          image_name="ghcr.io/buanet/obico-ml-api"
+          compose_file="$GITHUB_WORKSPACE/obico-server/docker-compose.yml"
+          override_file="$RUNNER_TEMP/compose.override.yml"
+
+          printf 'services:\n  ml_api:\n    image: %s:%s\n' \
+            "$image_name" "$SOURCE_SHA" > "$override_file"
+          docker compose -p obico -f "$compose_file" -f "$override_file" build ml_api
+
+          docker push "$image_name:$SOURCE_SHA"
+          docker tag "$image_name:$SOURCE_SHA" "$image_name:latest"
+          docker push "$image_name:latest"
+
+      - name: Record successfully published commit
+        if: steps.upstream.outputs.changed == 'true'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.upstream.outputs.source_sha }}
+        run: |
+          printf '%s\n' "$SOURCE_SHA" > .github/dependencies/.commit-id
+          git config user.name 'buanet'
+          git config user.email 'info@buanet.de'
+          git add .github/dependencies/.commit-id
+          git commit -m "Update ml_api source commit to $SOURCE_SHA"
+          git push
