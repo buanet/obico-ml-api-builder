@@ -1,14 +1,38 @@
-# obico-ml-api-builder
-Builds Docker image for ml-api from obico project
+# Obico ML API Image
 
-The `Build and publish ml_api` workflow checks the `release` branch of
-`TheSpaghettiDetective/obico-server` once a day and can also be run manually.
-When its latest commit differs from `.github/dependencies/.commit-id`, it
-builds only the `ml_api` service from that revision and publishes
-`ghcr.io/<owner>/obico-ml-api` with both the source commit SHA and `latest`
-tags. The recorded commit is updated only after both image tags were pushed.
+## :information_source: Information
+A prebuilt Docker image for the `ml_api` service from [TheSpaghettiDetective/obico-server](https://github.com/TheSpaghettiDetective/obico-server).
 
-The workflow requires the repository's Actions setting **Workflow permissions**
-to allow read and write access, so its token can publish to GHCR and commit the
-updated `.commit-id`. GHCR package visibility can be changed in the package
-settings after its first successful publication.
+It provides Obico's machine-learning API for AI failure detection and can be used with [Bambuddy](https://github.com/maziggy/bambuddy). The image is published as `ghcr.io/buanet/obico-ml-api`.
+
+For details see [official Bambuddy docs](https://wiki.bambuddy.cool/features/failure-detection/). 
+
+## :desktop_computer: Supported platforms
+
+The image is currently built for `linux/amd64`. It is not published as a multi-platform image.
+
+## :rocket: Usage
+
+```
+services:
+  ml-api:
+    image: ghcr.io/buanet/obico-ml-api:latest
+    container_name: ml-api
+    restart: unless-stopped
+    ports:
+      - "3333:3333"
+    command: >
+      bash -c "gunicorn --bind 0.0.0.0:3333 --workers 1 wsgi"
+    environment:
+      FLASK_APP: server.py
+      DEBUG: "False"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3333/hc/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+## :copyright: License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
